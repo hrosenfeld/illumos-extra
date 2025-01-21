@@ -59,6 +59,7 @@ STRAPPROTO =	$(DESTDIR:proto=proto.strap)
 
 SUBDIRS = \
 	bash \
+	berkeley-db \
 	bind \
 	bzip2 \
 	coreutils \
