@@ -61,6 +61,7 @@ SUBDIRS = \
 	bash \
 	berkeley-db \
 	bind \
+	blocklistd \
 	bzip2 \
 	coreutils \
 	cpp \

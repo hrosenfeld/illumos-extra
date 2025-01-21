@@ -52,6 +52,24 @@ f usr/sbin/host 0555 root bin
 f usr/share/man/man1/host.1 0444 root bin
 f usr/sbin/nslookup 0555 root bin
 f usr/share/man/man1/nslookup.1 0444 root bin
+# blocklistd
+f lib/svc/manifest/network/blocklistd.xml 0444 root sys
+f lib/svc/method/blocklistd 0555 root sys
+f usr/lib/amd64/libblocklist.so.0.0.0 0555 root bin
+s usr/lib/amd64/libblocklist.so.0=libblocklist.so.0.0.0
+d usr/lib/blocklistd 0755 root bin
+f usr/lib/blocklistd/blocklistd-helper 0555 root bin
+f usr/lib/libblocklist.so.0.0.0 0555 root bin
+s usr/lib/libblocklist.so.0=libblocklist.so.0.0.0
+f usr/sbin/blocklistctl 0555 root bin
+f usr/sbin/blocklistd 0555 root bin
+d usr/share/examples 0755 root bin
+d usr/share/examples/blocklistd 0755 root bin
+f usr/share/examples/blocklistd/blocklistd.conf 0444 root bin
+f usr/share/examples/blocklistd/npf.conf 0444 root bin
+f usr/share/man/man8/blocklistctl.8 0444 root bin
+f usr/share/man/man8/blocklistd.8 0444 root bin
+f usr/share/man/man5/blocklistd.conf.5 0444 root bin
 # bzip2
 h usr/bin/bzip2=usr/bin/bunzip2
 f usr/bin/bzip2recover 0555 root bin
