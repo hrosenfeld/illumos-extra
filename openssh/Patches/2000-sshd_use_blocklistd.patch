@@ -1,0 +1,179 @@
+diff --git a/auth.c b/auth.c
+--- a/auth.c	Thu Sep 19 22:20:48 2024
++++ b/auth.c	Tue Nov 26 10:38:37 2024
+@@ -75,6 +75,7 @@
+ #include "monitor_wrap.h"
+ #include "ssherr.h"
+ #include "channels.h"
++#include "pfilter.h"
+ 
+ /* import */
+ extern ServerOptions options;
+@@ -334,6 +335,7 @@
+ {
+ 	Authctxt *authctxt = (Authctxt *)ssh->authctxt;
+ 
++	pfilter_notify(1);
+ 	error("maximum authentication attempts exceeded for "
+ 	    "%s%.100s from %.200s port %d ssh2",
+ 	    authctxt->valid ? "" : "invalid user ",
+@@ -494,6 +496,7 @@
+ 	aix_restoreauthdb();
+ #endif
+ 	if (pw == NULL) {
++		pfilter_notify(1);
+ 		logit("Invalid user %.100s from %.100s port %d",
+ 		    user, ssh_remote_ipaddr(ssh), ssh_remote_port(ssh));
+ #ifdef CUSTOM_FAILED_LOGIN
+diff --git a/monitor.c b/monitor.c
+--- a/monitor.c	Tue Nov 26 10:30:29 2024
++++ b/monitor.c	Tue Nov 26 10:38:54 2024
+@@ -98,6 +98,8 @@
+ #include "sk-api.h"
+ #include "srclimit.h"
+ 
++#include "pfilter.h"
++
+ #ifdef GSSAPI
+ static Gssctxt *gsscontext = NULL;
+ #endif
+@@ -387,6 +389,7 @@
+ 			}
+ 		}
+ 		if (authctxt->failures > options.max_authtries) {
++			pfilter_notify(1);
+ 			/* Shouldn't happen */
+ 			fatal_f("privsep child made too many authentication "
+ 			    "attempts");
+@@ -399,10 +402,14 @@
+ 		hostbased_cuser = NULL;
+ 	}
+ #endif
+-	if (!authctxt->valid)
++	if (!authctxt->valid) {
++		pfilter_notify(1);
+ 		fatal_f("authenticated invalid user");
+-	if (strcmp(auth_method, "unknown") == 0)
++	}
++	if (strcmp(auth_method, "unknown") == 0) {
++		pfilter_notify(1);
+ 		fatal_f("authentication method name unknown");
++	}
+ 
+ 	debug_f("user %s authenticated by privileged process", authctxt->user);
+ 	auth_attempted = 0;
+@@ -1325,6 +1332,7 @@
+ 	} else {
+ 		/* Log failed attempt */
+ 		auth_log(ssh, 0, 0, auth_method, NULL);
++		pfilter_notify(1);
+ 		free(cuser);
+ 		free(chost);
+ 	}
+diff --git a/sshd-session.c b/sshd-session.c
+--- a/sshd-session.c	Tue Nov 26 10:30:29 2024
++++ b/sshd-session.c	Tue Nov 26 10:37:43 2024
+@@ -115,6 +115,8 @@
+ #include "srclimit.h"
+ #include "dh.h"
+ 
++#include "pfilter.h"
++
+ /* Re-exec fds */
+ #define REEXEC_DEVCRYPTO_RESERVED_FD	(STDERR_FILENO + 1)
+ #define REEXEC_STARTUP_PIPE_FD		(STDERR_FILENO + 2)
+@@ -208,6 +210,7 @@
+ static void
+ grace_alarm_handler(int sig)
+ {
++        pfilter_notify(1);
+ 	/*
+ 	 * Try to kill any processes that we have spawned, E.g. authorized
+ 	 * keys command helpers or privsep children.
+@@ -1238,6 +1241,8 @@
+ 	ssh_signal(SIGCHLD, SIG_DFL);
+ 	ssh_signal(SIGINT, SIG_DFL);
+ 
++        pfilter_init();
++
+ 	/*
+ 	 * Register our connection.  This turns encryption off because we do
+ 	 * not have a key.
+@@ -1545,6 +1550,9 @@
+ {
+ 	extern int auth_attempted; /* monitor.c */
+ 
++	if (i == 255)
++		pfilter_notify(1);
++
+ 	if (the_active_state != NULL && the_authctxt != NULL) {
+ 		do_cleanup(the_active_state, the_authctxt);
+ 		if (privsep_is_preauth &&
+diff --git a/pfilter.h b/pfilter.h
+new file mode 100644
+--- /dev/null
++++ b/pfilter.h	Tue Nov 26 10:41:45 2024
+@@ -1,0 +1,2 @@
++void pfilter_notify(int);
++void pfilter_init(void);
+diff --git a/pfilter.c b/pfilter.c
+new file mode 100644
+--- /dev/null
++++ b/pfilter.c	Tue Nov 26 10:42:39 2024
+@@ -1,0 +1,36 @@
++#include "includes.h"
++#include "ssh.h"
++#include "packet.h"
++#include "log.h"
++#include "pfilter.h"
++#include <blocklist.h>
++
++static struct blocklist *blstate;
++
++void
++pfilter_init()
++{
++	blstate = blocklist_open();
++}
++
++extern struct ssh *the_active_state;
++
++void
++pfilter_notify(int a)
++{
++	int fd;
++	if (the_active_state == NULL)
++		return;
++	if (blstate == NULL)
++		pfilter_init();
++	if (blstate == NULL)
++		return;
++	// XXX: 3?
++ 	fd = ssh_packet_connection_is_on_socket(the_active_state) ?
++	    ssh_packet_get_connection_in(the_active_state) : 3;
++	(void)blocklist_r(blstate, a, fd, "ssh");
++	if (a == 0) {
++		blocklist_close(blstate);
++		blstate = NULL;
++	}
++}
+diff --git a/Makefile.in b/Makefile.in
+--- a/Makefile.in	Tue Nov 26 10:30:29 2024
++++ b/Makefile.in	Tue Nov 26 10:48:14 2024
+@@ -138,6 +138,7 @@
+ 	auth2-gss.o gss-serv.o gss-serv-krb5.o \
+ 	loginrec.o auth-pam.o auth-shadow.o auth-sia.o \
+ 	sftp-server.o sftp-common.o \
++	pfilter.o \
+ 	sandbox-null.o sandbox-rlimit.o sandbox-systrace.o sandbox-darwin.o \
+ 	sandbox-seccomp-filter.o sandbox-capsicum.o sandbox-pledge.o \
+ 	sandbox-solaris.o uidswap.o sftp_provider.o $(SKOBJS)
+@@ -220,7 +221,7 @@
+ 	$(LD) -o $@ $(SSHDOBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHDLIBS) $(LIBS) $(CHANNELLIBS)
+ 
+ sshd-session$(EXEEXT): libssh.a	$(LIBCOMPAT) $(SSHD_SESSION_OBJS)
+-	$(LD) -o $@ $(SSHD_SESSION_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS) $(CHANNELLIBS)
++	$(LD) -o $@ $(SSHD_SESSION_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat -lblocklist $(SSHDLIBS) $(LIBS) $(GSSLIBS) $(K5LIBS) $(CHANNELLIBS)
+ 
+ scp$(EXEEXT): $(LIBCOMPAT) libssh.a $(SCP_OBJS)
+ 	$(LD) -o $@ $(SCP_OBJS) $(LDFLAGS) -lssh -lopenbsd-compat $(LIBS)
